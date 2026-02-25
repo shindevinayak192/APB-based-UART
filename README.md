@@ -4,7 +4,7 @@ This repository contains the RTL implementation of a UART (Universal Asynchronou
  -------------------------------------------------
 I) Valid Operation Logic : Provides boundary protection. Prevents overflow and underflow.
  -------------------------------------------------
- **> assign push_valid = push && (!fifo_full || pop);
+ **--> assign push_valid = push && (!fifo_full || pop);
  assign pop_valid  = pop  && (!fifo_empty || push);**
 
 For these lines of code following conditions were considered:
