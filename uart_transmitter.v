@@ -33,6 +33,8 @@ module uart_transmitter(PCLK, PRESETn, PWDATA, tx_fifo_push, enable, LCR, tx_fif
 	wire [7:0]tx_fifo_out;	//wire for reading data from the transmit FIFO.
 	reg pop_tx_fifo;		//signal to pop data from the transmit FIFO. Active high.
 	reg TXD_tmp;			//temporary register holding the current value to be transmitted on the TXD line.
+	reg parity;				//register holding the parity value.
+	reg parity_data;		//register holding temporary parity value based on number of bits in a character.
 	
 	//uart_fifo instantiation
 	uart_fifo tx_fifo(	.clk_in(PCLK), 
@@ -44,311 +46,304 @@ module uart_transmitter(PCLK, PRESETn, PWDATA, tx_fifo_push, enable, LCR, tx_fif
 						.fifo_empty(tx_fifo_empty), 
 						.fifo_full(tx_fifo_full), 
 						.count(tx_fifo_count));
-	//state registers
-	reg [3:0] next_state;
 	
-	//next_state logic
+	//baud pulse logic
 	always@(posedge PCLK or negedge PRESETn)
 		begin
 			if(!PRESETn)
-				tx_state <= IDLE;
+				bit_counter	<=	4'd0;
+			else if(enable)
+				begin
+					if(bit_counter == 4'hf)
+						bit_counter <= 4'd0;
+					else
+						bit_counter	<=	bit_counter	+ 1'b1;
+				end
+		end
+		
+	//internal FIFO input 'pop' logic
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				pop_tx_fifo	<=	1'b0;
+			else if(!tx_fifo_empty	&&	tx_state == START	&&	(bit_counter == 4'h7)	&&	enable)
+				pop_tx_fifo	<=	1'b1;
 			else
-				tx_state <= next_state;
+				pop_tx_fifo	<=	1'b0;
 		end
 	
-	//combinational block
-	always@(*)
+	//FSM logic
+	always@(posedge PCLK or negedge PRESETn)
 		begin
-			busy <= 1'b0;
-			tx_buffer <= 8'b0;		
-			TXD_tmp <= 1'b1;		//the transmission line TX is normally held at high voltage when it is not transmitting data.
-			pop_tx_fifo <= 1'b0;
-			bit_counter <= 4'b0;
-			
-			case(tx_state)
-				IDLE: 	begin	
-							if(!tx_fifo_empty && enable)
-								begin
-									next_state <= START;
-									tx_buffer <= tx_fifo_out;
-									pop_tx_fifo <= 1'b1;
-									busy <= 1'b1;
-									bit_counter <= 4'b0;
+			if(!PRESETn)
+				tx_state	<=	IDLE;
+			else if(enable)
+				begin
+					case(tx_state)
+						IDLE: 	begin	
+									if(!tx_fifo_empty && bit_counter == 4'hf)
+										begin
+											tx_state <= START;
+										end
 								end
-							else
-								busy <= 1'b0;
-						end
-				START: 	begin
-							pop_tx_fifo <= 1'b0;
-							TXD_tmp <= 1'b0;
-							if(	enable)
-								begin
+						START: 	begin
 									if(bit_counter == 4'hf) 		//here 4'hf represents value '15' in hexadecimal format.
 										begin
-											bit_counter <= 4'b0;
-											next_state <= BIT0;
-										end
-									else
-										begin
-											bit_counter <= bit_counter + 1'b1;
+											tx_state <= BIT0;
 										end
 								end
-						end
-				BIT0: 	begin
-							TXD_tmp <= tx_buffer[0];
-							if(enable)
-								begin
+						BIT0: 	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
-											next_state <= BIT1;
-										end
-									else
-										begin
-											next_state <= BIT0;
-											bit_counter <= bit_counter + 1'b1;
+											tx_state <= BIT1;
 										end
 								end
-						end
-				BIT1:	begin
-							TXD_tmp <= tx_buffer[1];
-							if(enable)
-								begin
+						BIT1:	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
-											next_state <= BIT2;
-										end
-									else
-										begin
-											next_state <= BIT1;
-											bit_counter <= bit_counter + 1'b1;
+											tx_state <= BIT2;
 										end
 								end
-						end
-				BIT2: 	begin
-							TXD_tmp <= tx_buffer[2];
-							if(enable)
-								begin
+						BIT2: 	begin
 									if(bit_counter == 4'hf)
 										begin
-											bit_counter <= 4'b0;
-											next_state <= BIT3;
-										end
-									else
-										begin
-											next_state <= BIT2;
-											bit_counter <= bit_counter + 1'b1;
+											tx_state <= BIT3;
 										end
 								end
-						end
-				BIT3: 	begin
-							TXD_tmp <= tx_buffer[3];
-							if(enable)
-								begin
+						BIT3: 	begin
 									if(bit_counter == 4'hf)
 										begin
-											bit_counter <= 4'b0;
-											next_state <= BIT4;
+											tx_state <= BIT4;
 										end
-									else
-										begin
-											next_state <= BIT3;
-											bit_counter <= bit_counter + 1'b1;
-										end
-								end
-						end
-				BIT4: 	begin
-							TXD_tmp <= tx_buffer[4];
-							if(enable)
-								begin
+									end
+						BIT4: 	begin
 									if(bit_counter == 4'hf)  
 										begin
-											bit_counter <= 4'b0;
-											if(LCR[1:0] != 2'b00))	//here LCR[1:0] == 00 means the number of bits per character are '5 bits'.
+											if(LCR[1:0] != 2'b00)	//here LCR[1:0] == 00 means the number of bits per character are '5 bits'.
 												begin
-													next_state <= BIT5;
+													tx_state <= BIT5;
 												end
 											else
 												begin
-													if(LCR[3] == 1))	//here when LCR[3] == 1 means 'Parity Enabled'.
+													if(LCR[3] == 1)	//here when LCR[3] == 1 means 'Parity Enabled'.
 														begin
-															tx_buffer[7:5] <= 3'b0; //as per above consideration we are considering a 5-bits character so the remaining
-																					//bits will not be considered.
-															next_state <= PARITY;
+															tx_state <= PARITY;
 														end
 													else
 														begin
-															next_state <= STOP1;
+															tx_state <= STOP1;
 														end
 												end
 										end
-									else
-										begin
-											next_state <= BIT4;
-											bit_counter <= bit_counter + 1'b1;
-										end
-								end
-						end		
-				BIT5: 	begin
-							TXD_tmp <= tx_buffer[5];
-							if(enable)
-								begin
+								end		
+						BIT5: 	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
-											if(LCR[1:0] == 2'b01)	//here the number of bits per character are 6-bits.
+											if(LCR[1:0] > 2'b01)	//here the number of bits per character are more than 6-bits.
 												begin
-													next_state <= BIT6;
+													tx_state <= BIT6;
 												end
 											else
 												begin
 													if(LCR[3] == 1)
 														begin
-															tx_buffer[7:6] <= 2'b00;
-															next_state <= PARITY;
+															tx_state <= PARITY;
 														end
 													else
 														begin
-															next_state <= STOP1;
+															tx_state <= STOP1;
 														end
 												end
 										end
-									else
-										begin
-											next_state <= BIT5;
-											bit_counter <= bit_counter + 1'b1;
-										end
 								end
-						end
-				BIT6: 	begin
-							TXD_tmp <= tx_buffer[6];
-							if(enable)
-								begin
+						BIT6: 	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
 											if(LCR[1:0] == 2'b11)
 												begin
-													next_state <= BIT7;
+													tx_state <= BIT7;
 												end
 											else
 												begin
 													if(LCR[3] == 1)
 														begin
-															tx_buffer[7] <= 1'b0;
-															next_state <= PARITY;
+															tx_state <= PARITY;
 														end
 													else
 														begin
-															next_state <= STOP1;
+															tx_state <= STOP1;
 														end
 												end
 										end
-									else
-										begin
-											next_state <= BIT6;
-											bit_counter <= bit_counter + 1'b1;
-										end
-								end
-						end	
-				BIT7: 	begin
-							TXD_tmp <= tx_buffer[7];
-							if(enable)
-								begin
+								end	
+						BIT7: 	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
 											if(LCR[3] == 1)
 												begin
-													next_state <= PARITY;
+													tx_state <= PARITY;
 												end
 											else
 												begin
-													next_state <= STOP1;
+													tx_state <= STOP1;
 												end
 										end
-									else
-										begin
-											next_state <= BIT7;
-											bit_counter <= bit_counter + 1'b1;
-										end
 								end
-						end
-				PARITY:	begin
-							case(LCR[5:3])
-							//LCR[3]: 0--no parity, and 1--parity enabled.
-							//LCR[4]: 0--odd parity, and 1--even parity.
-							//LCR[5]: 0--stick parity disabled, and 1--the inverse of bit '4' is 
-							//			transmitted as parity bit.
-								3'b001: TXD_tmp <= ~(^tx_buffer);	//odd PARITY
-								3'b011: TXD_tmp <= ^(tx_buffer);	//even PARITY
-								3'b101: TXD_tmp <= 1;
-								3'b111: TXD_tmp <= 0;
-								default: TXD_tmp <= 0;
-							endcase
-							if(enable)
-								begin
+						PARITY:	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
-											next_state <= STOP1;
-										end
-									else
-										begin
-											bit_counter <= bit_counter + 1'b1;
+											if(LCR[2] == 1'b1)
+												tx_state <= STOP2;
+											else
+												tx_state <=	STOP1;
 										end
 								end
-						end
-				STOP1:	begin
-							TXD_tmp <= 1'b1;
-							if(enable)
-								begin
+						STOP1:	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
-											if(LCR[2] == 1)
+											if(LCR[2] == 1'b1)
 												begin
-													next_state <= STOP2;
+													tx_state <= STOP2;
 												end
 											else	
 												begin
-													next_state <= IDLE;
+													tx_state <= IDLE;
 												end
 										end
-									else
-										begin
-											bit_counter <= bit_counter + 1'b1;
-										end
 								end
-						end
-				STOP2: 	begin
-							TXD_tmp <= 1'b1;
-							if(enable)
-								begin
+						STOP2: 	begin
 									if(bit_counter == 4'hf) 
 										begin
-											bit_counter <= 4'b0;
-											if(!tx_fifo_empty)
-												begin
-													next_state <= START;
-												end
-											else
-												begin
-													next_state <= IDLE;
-												end
-										end
-									else
-										begin
-											bit_counter <= bit_counter + 1'b1;
+											tx_state <= IDLE;
 										end
 								end
-						end
-				default: next_state <= IDLE;
-			endcase
+						default: tx_state <= IDLE;
+					endcase
+				end
 		end
 		
-	assign TXD = LCR[6] ? 1'b0: TXD_tmp;	//LCR[6]: break control bit.
-											//		: '0'--break disabled, and '1'--the TX serial data line is forced to logic '0' 
-											//			   to indicate break condition.
+	//TXD_tmp logic
+	always@(*)
+		begin
+			case(tx_state)
+				IDLE: 		TXD_tmp = 1'b1;
+				START: 		TXD_tmp = 1'b0;
+				BIT0: 		TXD_tmp = tx_buffer[0];
+				BIT1: 		TXD_tmp = tx_buffer[1];
+				BIT2: 		TXD_tmp = tx_buffer[2];
+				BIT3: 		TXD_tmp = tx_buffer[3];
+				BIT4: 		TXD_tmp = tx_buffer[4];
+				BIT5: 		TXD_tmp = tx_buffer[5];
+				BIT6: 		TXD_tmp = tx_buffer[6];
+				BIT7: 		TXD_tmp = tx_buffer[7];
+				PARITY: 	TXD_tmp = parity;
+				STOP1: 		TXD_tmp = 1'b1;
+				STOP2: 		TXD_tmp = 1'b1;
+				default: 	TXD_tmp = 1'b1;
+			endcase
+		end
+	
+	//busy logic
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				busy <= 1'b0;
+			else if(tx_state == IDLE)
+				busy <= 1'b0;
+			else
+				busy <= 1'b1;
+		end
+	
+	//tx_buffer logic
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				begin
+					tx_buffer	<=	8'd0;
+				end
+			else if(enable)
+				begin
+					if(tx_state == START && bit_counter == 4'd0)
+						begin
+							case(tx_state)
+								2'b00: 	begin	
+											tx_buffer[4:0]	<=	tx_fifo_out[4:0];
+											tx_buffer[7:5]	<=	3'd0;
+										end
+								2'b01:	begin
+											tx_buffer[5:0]	<=	tx_fifo_out[5:0];
+											tx_buffer[7:6]	<=	2'd0;
+										end
+								2'b10:	begin
+											tx_buffer[6:0]	<=	tx_fifo_out[6:0];
+											tx_buffer[7]	<=	1'b1;
+										end
+								2'b11:	tx_buffer	<=	tx_fifo_out;
+								default:	tx_buffer	<=	tx_fifo_out;
+							endcase
+						end
+					else if((	tx_state == BIT0 ||
+								tx_state == BIT1 || 
+								tx_state == BIT2 || 
+								tx_state == BIT3 || 
+								tx_state == BIT4 || 
+								tx_state == BIT5 || 
+								tx_state == BIT6 || 
+								tx_state == BIT7) 
+								&& bit_counter == 4'hf)
+						begin
+							tx_buffer <= tx_buffer >> 1;
+						end
+				end
+		end
+				
+	//parity logic
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				parity <= 1'b0;
+			else if(enable && tx_state == START && bit_counter == 4'd0)
+				begin	
+					if(LCR[3])		//checking parity enable
+						begin
+							//compute parity only over active characters
+							case(LCR[1:0])		//defines the number of bits per character
+								2'b00: parity_data = ^tx_buffer[4:0];		//blocking assignment '=' : used for temporary combinational variables used immediately
+								2'b01: parity_data = ^tx_buffer[5:0];
+								2'b10: parity_data = ^tx_buffer[6:0];
+								2'b11: parity_data = ^tx_buffer[7:0];
+								default: parity_data = ^tx_buffer[7:0];
+							endcase
+							
+							//parity type decode: even or odd
+							case({LCR[5:4]})
+								//LCR[3]: 0--no parity, and 1--parity enabled.
+								//LCR[4]: 0--odd parity, and 1--even parity.
+								//LCR[5]: 0--stick parity disabled, and 1--the inverse of bit '4' is 
+								//			transmitted as parity bit.
+								2'b00: parity <= ~(parity_data);	//odd PARITY
+								2'b01: parity <= 	parity_data;	//even PARITY
+								2'b10: parity <= 1'b1;			//odd PARITY but LCR[4] inverse
+								2'b11: parity <= 1'b0;			//even PARITY but LCR[4] inverse
+								default: parity <= 1'b0;
+							endcase
+						end
+					else
+						parity	<=	1'b0;		//disable PARITY
+				end
+		end
+		
+	//TXD and LCR[6] checking
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				TXD <= 1'b1;
+			//LCR[6]: break control bit.
+			//		: '0'--break disabled, and '1'--the TX serial data line is forced to logic '0' 
+			//			   to indicate break condition.
+			else if(LCR[6])
+				TXD	<= 1'b0;
+			else
+				TXD <= TXD_tmp;
+		end
 endmodule
