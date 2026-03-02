@@ -47,10 +47,37 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 	reg [7:0]counter_b;						//break counter.
 	reg [9:0]counter_t;						//timeout counter.
 	reg parity_bit;
+	reg temp_RXD;							//used for rx synchronization
+	reg stable_RXD;							//used for rx synchronization
 	
-	//
-	assign break_error 	= (counter_b == 0);
-	assign time_out 	= (counter_t == 0);
+	//Break logic
+	reg break_error_reg;
+	assign break_error 	= break_error_reg;
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				break_error_reg	<=	1'b0;
+			//Break detected when counter_b reaches '0'.
+			else if(enable && (counter_b == 8'd1) && !stable_RXD)
+				break_error_reg	<= 	1'b1;
+			//Clear break when line goes high again.
+			else if(stable_RXD)
+				break_error_reg	<=	1'b0;
+		end
+	
+	//Timeout logic
+	reg time_out_reg;
+	assign time_out 	= time_out_reg;
+	always@(posedge PCLK or negedge PRESETn)
+		begin
+			if(!PRESETn)
+				time_out_reg	<=	1'b0;
+			//Timeout event: counter just reached '0'.
+			else if(enable && (counter_t == 10'd1) && !rx_fifo_empty)
+				time_out_reg	<=	1'b1;
+			else if(push_rx_fifo || pop_rx_fifo || rx_fifo_empty)
+				time_out_reg	<=	1'b0;
+		end
 	
 	//uart_fifo instantiation
 	uart_fifo rx_fifo(	.clk_in(PCLK), 
@@ -62,6 +89,14 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 						.fifo_empty(rx_fifo_empty), 
 						.fifo_full(rx_fifo_full), 
 						.count(rx_fifo_count));
+						
+	//Dual Clock Sync (DCS) or Dual Flop Cros Domain.
+	//RX Synchronizer block.
+	always@(posedge PCLK)
+		begin
+			temp_RXD	<=	RXD;
+			stable_RXD	<=	temp_RXD;
+		end
 	
 	//FSM logic
 	always@(posedge PCLK or negedge PRESETn)
@@ -84,8 +119,9 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 					case(rx_state)
 						IDLE: 	begin
 									bit_counter	<= 4'd0;
+									rx_buffer	<= 8'd0;
 									rx_idle		<= 1'b1;
-									if(!RXD && !break_error)
+									if(!stable_RXD && !break_error)
 										begin
 											rx_state 	<= START;
 											rx_idle		<= 1'b0;
@@ -96,7 +132,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 										begin
 											if(bit_counter == 4'h7)
 												begin
-													if(!RXD)
+													if(!stable_RXD)
 														begin
 															rx_state	<= BIT0;
 															bit_counter	<= 4'd0;
@@ -119,7 +155,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 												begin
 													bit_counter		<= 4'd0;
 													rx_state		<= BIT1;
-													rx_buffer[0]	<= RXD;
+													rx_buffer[0]	<= stable_RXD;
 												end
 											else
 												begin
@@ -134,7 +170,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 												begin
 													bit_counter		<= 4'd0;
 													rx_state		<= BIT2;
-													rx_buffer[1]	<= RXD;
+													rx_buffer[1]	<= stable_RXD;
 												end
 											else
 												begin
@@ -149,7 +185,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 												begin
 													bit_counter		<= 4'd0;
 													rx_state		<= BIT3;
-													rx_buffer[2]	<= RXD;
+													rx_buffer[2]	<= stable_RXD;
 												end
 											else
 												begin
@@ -164,7 +200,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 												begin
 													bit_counter		<= 4'd0;
 													rx_state		<= BIT4;
-													rx_buffer[3]	<= RXD;
+													rx_buffer[3]	<= stable_RXD;
 												end
 											else
 												begin
@@ -178,7 +214,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 											if(bit_counter == 4'hf)
 												begin
 													bit_counter		<= 4'd0;
-													rx_buffer[4]	<= RXD;
+													rx_buffer[4]	<= stable_RXD;
 													if(LCR[1:0] != 0)
 														begin
 															rx_state	<= BIT5;
@@ -207,7 +243,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 											if(bit_counter == 4'hf)
 												begin
 													bit_counter		<= 4'd0;
-													rx_buffer[5]	<= RXD;
+													rx_buffer[5]	<= stable_RXD;
 													if(LCR[1:0] > 2'b01)
 														begin
 															rx_state		<= BIT6;
@@ -236,7 +272,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 											if(bit_counter == 4'hf)
 												begin
 													bit_counter		<= 4'd0;
-													rx_buffer[6]	<= RXD;
+													rx_buffer[6]	<= stable_RXD;
 													if(LCR[1:0] == 2'b11)
 														begin
 															rx_state	<= BIT7;
@@ -265,7 +301,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 											if(bit_counter == 4'hf)
 												begin
 													bit_counter		<= 4'd0;
-													rx_buffer[7]	<= RXD;
+													rx_buffer[7]	<= stable_RXD;
 													if(LCR[3] == 1)
 														begin
 															rx_state	<= PARITY;
@@ -288,7 +324,16 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 												begin
 													bit_counter	<= 4'd0;
 													rx_state	<= STOP1;
-													parity_bit	<= (^rx_buffer) ^ RXD;
+													//Calculate expected parity from data only.
+													case(LCR[5:3])
+														3'b001:	parity_bit	<=	~(^rx_buffer);	//odd PARITY
+														3'b011:	parity_bit	<=   ^rx_buffer; 	//even PARITY
+														3'b101:	parity_bit	<=	1'b1;			//stick 1
+														3'b111:	parity_bit	<=	1'b0;			//stick 0
+														default: parity_bit	<=	1'b0;
+													endcase
+													//Compare with received parity bit.
+													parity_error	<=	(parity_bit	!=	stable_RXD);
 												end
 											else
 												begin
@@ -302,15 +347,8 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 											if(bit_counter == 4'hf)
 												begin
 													bit_counter	<=	4'd0;
-													framing_error_temp	<=	~RXD;
+													framing_error_temp	<=	~stable_RXD;
 													rx_state	<=	STOP2;
-													case(LCR[5:3])
-														3'b001	:	parity_error	<=	~parity_bit;	//odd
-														3'b011	:	parity_error	<=	parity_bit;		//even
-														3'b101	:	parity_error	<=	1'b1;
-														3'b111	:	parity_error	<=	1'b0;
-														default	:	parity_error	<=	1'b0;
-													endcase
 												end
 											else
 												begin
@@ -351,7 +389,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 		end
 		
 	//Timeout vallue logic
-	always@(LCR)
+	always@(*)
 		begin
 			case(LCR[3:0])
 				4'b0000:							toc_value	=	10'd447;	//7 bits
@@ -372,8 +410,8 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 	always@(posedge PCLK or negedge PRESETn)
 		begin
 			if(!PRESETn)
-				counter_b	<=	8'd159;
-			else if(RXD)
+				counter_b	<=	brc_value;	//8'd159
+			else if(stable_RXD)
 				counter_b	<=	brc_value;	//character time length - 1
 			else if(enable && (counter_b != 8'd0))
 				counter_b	<=	counter_b	-	1'b1;
@@ -383,12 +421,14 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 	always@(posedge PCLK or negedge PRESETn)
 		begin
 			if(!PRESETn)
-				counter_t	<=	10'd639;	//10 bits for the default 8N1
+				counter_t	<=	toc_value;		//10'd639	//10 bits for the default 8N1
 			else
 				begin
-					if (push_rx_fifo || pop_rx_fifo)		//counter is reset when RX FIFO is empty, accessed or above trigger level
+					if(rx_fifo_empty)
+						counter_t	<=	toc_value;
+					else if (push_rx_fifo || pop_rx_fifo)		//counter is reset when RX FIFO is empty, accessed or above trigger level
 						counter_t	<=	toc_value;		
-					else if(enable && (counter_t != 10'b0))
+					else if(enable && (counter_t != 10'd0))
 						counter_t	<= 	counter_t	-	1'b1;
 				end
 		end
