@@ -1,4 +1,4 @@
-module uart_fifo(clk_in, rstn, data_in, push, pop, data_out, fifo_empty, fifo_full, count);
+module uart_fifo(clk_in, rstn, data_in, push, pop, clear, data_out, fifo_empty, fifo_full, count);
 	
 	parameter 	depth = 16,
 				width = 8;
@@ -7,6 +7,7 @@ module uart_fifo(clk_in, rstn, data_in, push, pop, data_out, fifo_empty, fifo_fu
 	input rstn;
 	input push;		//write enable 
 	input pop;		//read enable
+	input clear;
 	input [(width - 1):0]data_in;
 	output fifo_empty, fifo_full;
 	output reg [(width - 1):0]data_out;
@@ -20,7 +21,7 @@ module uart_fifo(clk_in, rstn, data_in, push, pop, data_out, fifo_empty, fifo_fu
 	//Write Logic
 	always@(posedge clk_in or negedge rstn)
 		begin
-			if(!rstn)
+			if(!rstn || clear)
 				begin
 					ip_count		<= 		4'd0;
 				end
@@ -34,7 +35,7 @@ module uart_fifo(clk_in, rstn, data_in, push, pop, data_out, fifo_empty, fifo_fu
 	//Read Logic
 	always@(posedge clk_in or negedge rstn)
 		begin
-			if(!rstn)
+			if(!rstn || clear)
 				begin
 					data_out	<=		0;
 					op_count	<=		0;
@@ -51,7 +52,7 @@ module uart_fifo(clk_in, rstn, data_in, push, pop, data_out, fifo_empty, fifo_fu
 	//count Logic
 	always@(posedge clk_in or negedge rstn)
 		begin
-			if(!rstn)
+			if(!rstn || clear)
 				begin
 					count		<=		0;
 				end
