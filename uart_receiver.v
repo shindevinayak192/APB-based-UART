@@ -10,6 +10,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 	input pop_rx_fifo;
 	input enable;							//Baud pulse for serial data transmission.
 	input [7:0]LCR;
+	input clear_fifo;
 	output reg rx_idle;
 	output [7:0]rx_fifo_out;
 	output [4:0]rx_fifo_count;
@@ -84,7 +85,8 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 						.rstn(PRESETn), 
 						.data_in(rx_buffer), 
 						.push(push_rx_fifo), 
-						.pop(pop_rx_fifo), 
+						.pop(pop_rx_fifo),
+						.clear(clear_fifo),
 						.data_out(rx_fifo_out), 
 						.fifo_empty(rx_fifo_empty), 
 						.fifo_full(rx_fifo_full), 
@@ -388,7 +390,7 @@ module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle,
 				end
 		end
 		
-	//Timeout vallue logic
+	//Timeout value logic
 	always@(*)
 		begin
 			case(LCR[3:0])
