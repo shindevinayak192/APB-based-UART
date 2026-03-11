@@ -1,4 +1,4 @@
-module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, rx_idle, 
+module uart_receiver(PCLK, PRESETn, RXD, pop_rx_fifo, enable, LCR, clear_fifo, rx_idle, 
 					rx_fifo_out, rx_fifo_count, push_rx_fifo, rx_fifo_empty,
 					rx_fifo_full, rx_overrun, parity_error, framing_error, 
 					break_error, time_out);
