@@ -1,4 +1,4 @@
-module uart_transmitter(PCLK, PRESETn, PWDATA, tx_fifo_push, enable, LCR, tx_fifo_count, busy, tx_fifo_empty, tx_fifo_full, TXD);
+module uart_transmitter(PCLK, PRESETn, PWDATA, tx_fifo_push, enable, LCR, clear_fifo, tx_fifo_count, busy, tx_fifo_empty, tx_fifo_full, TXD);
 
 	input PCLK; 
 	input PRESETn; 
@@ -6,6 +6,7 @@ module uart_transmitter(PCLK, PRESETn, PWDATA, tx_fifo_push, enable, LCR, tx_fif
 	input enable;
 	input [7:0]PWDATA;
 	input [7:0]LCR;
+	input clear_fifo;
 	output reg [4:0]tx_fifo_count;
 	output reg busy;
 	output tx_fifo_empty, tx_fifo_full;
@@ -42,6 +43,7 @@ module uart_transmitter(PCLK, PRESETn, PWDATA, tx_fifo_push, enable, LCR, tx_fif
 						.data_in(PWDATA), 
 						.push(tx_fifo_push), 
 						.pop(pop_tx_fifo), 
+						.clear(clear_fifo),
 						.data_out(tx_fifo_out), 
 						.fifo_empty(tx_fifo_empty), 
 						.fifo_full(tx_fifo_full), 
