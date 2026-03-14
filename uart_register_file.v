@@ -4,7 +4,8 @@ module uart_register_file(	PCLK, PRESETn, PSEL, PWRITE, PENABLE, PWDATA, PADDR,
 							rx_data_out, rx_idle, rx_overrun, parity_error,
 							framing_error, break_error, time_out, rx_fifo_count,
 							rx_fifo_empty, rx_fifo_full, push_rx_fifo,
-							rx_enable, rx_fifo_re, irq, loopback, baud_o, LCR);
+							rx_enable, rx_fifo_re, irq, loopback, baud_o, clear_tx_fifo,
+						  	clear_rx_fifo, LCR);
 	
 	//APB interface signals
 	input PCLK;
